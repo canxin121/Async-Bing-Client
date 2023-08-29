@@ -1,3 +1,4 @@
+Features  
 - Use API similar to the Newbing website
 - Support image recognition by providing images as input
 - Enable human language-based drawing
