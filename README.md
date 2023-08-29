@@ -1,4 +1,4 @@
-[中文文档](#README_zh_cn.md)  
+[中文文档](README_zh_cn.md)  
 
 Features  
 - Use API similar to the Newbing website
