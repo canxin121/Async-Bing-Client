@@ -1,5 +1,14 @@
-Here is the English translation of the markdown file:
-
+- Use API similar to the Newbing website
+- Support image recognition by providing images as input
+- Enable human language-based drawing
+- Facilitate persistent storage of session data
+- Organize WebSocket communication (WSS) information into custom classes, supporting output categorization for easy developer encapsulation
+- High concurrency processing capability
+- Rapid retrieval of chat data
+- Bulk conversation deletion functionality
+- No need for Tun mode proxy
+- Support HTTP and SOCKS proxies
+  
 # Usage Guide
 
 ## Table of Contents
