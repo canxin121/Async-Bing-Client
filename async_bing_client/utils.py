@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import http.cookies
 import json
@@ -8,13 +9,26 @@ import random
 import sys
 import urllib.parse
 import uuid
+from contextvars import copy_context
 from datetime import datetime
+from functools import wraps, partial
+from io import BytesIO
 from pathlib import Path
+from typing import (
+    TypeVar,
+    Callable,
+    Coroutine,
+)
 from typing import Union, Literal
 
 import aiohttp
+from PIL import Image, ImageOps
+from typing_extensions import ParamSpec
 
 from .const import ConversationStyle, LocationHint, IMAGE_HEADERS, FORWARDED_IP
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 def parse_proxy_url(url: str):
@@ -32,9 +46,17 @@ def parse_proxy_url(url: str):
 
 
 def format_personality(personality: str):
-    return ''.join([('-' + c if random.random() < 0.5 else '_' + c)
-                    if i > 0 else c for i, c in
-                    enumerate(f"[system](#additional_instructions)\n{personality}\n\n")]) + "\n\n"
+    return (
+        "".join(
+            [
+                ("-" + c if random.random() < 0.5 else "_" + c) if i > 0 else c
+                for i, c in enumerate(
+                    f"[system](#additional_instructions)\n{personality}\n\n"
+                )
+            ]
+        )
+        + "\n\n"
+    )
 
 
 def async_retry(max_retries):
@@ -48,6 +70,7 @@ def async_retry(max_retries):
                 except Exception as e:
                     retries += 1
                     error = e
+            await asyncio.sleep(1)
             raise Exception(f"Max Retry Exceed: {error}")
 
         return wrapper
@@ -72,18 +95,42 @@ def append_identifier(msg: dict) -> str:
     return json.dumps(msg, ensure_ascii=False) + "\x1e"
 
 
-async def cookiejar_to_listdict(cookiejar):
-    cookie_list = []
-    for cookie in cookiejar:
-        cookie_dict = {
-            'name': cookie.key,
-            'value': cookie.value,
-            'domain': cookie.domain,
-            'path': cookie.path,
-            'expires': cookie.expires
-        }
-        cookie_list.append(cookie_dict)
-    return cookie_list
+def run_sync(call: Callable[P, R]) -> Callable[P, Coroutine[None, None, R]]:
+    """一个用于包装 sync function 为 async function 的装饰器
+
+    参数:
+        call: 被装饰的同步函数
+    """
+
+    @wraps(call)
+    async def _wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        loop = asyncio.get_running_loop()
+        pfunc = partial(call, *args, **kwargs)
+        context = copy_context()
+        result = await loop.run_in_executor(None, partial(context.run, pfunc))
+        return result
+
+    return _wrapper
+
+
+@run_sync
+def compress_image(infile: bytes) -> str:
+    img = Image.open(BytesIO(infile))
+    img = img.convert("RGB")
+    size = len(infile)
+    max_size = 1e6
+    if size <= max_size:
+        outfile = BytesIO()
+        img.save(outfile, format="JPEG", quality=80, optimize=True)
+        return base64.b64encode(outfile.getvalue()).decode("utf-8")
+    else:
+        ratio = (size / max_size) ** 0.6
+        new_width = int(img.width / ratio)
+        new_height = int(img.height / ratio)
+        img = ImageOps.fit(img, (new_width, new_height), method=Image.LANCZOS)
+        outfile = BytesIO()
+        img.save(outfile, format="JPEG", quality=80, optimize=True)
+        return base64.b64encode(outfile.getvalue()).decode("utf-8")
 
 
 async def process_image_to_base64(image: str | bytes | Path):
@@ -100,7 +147,8 @@ async def process_image_to_base64(image: str | bytes | Path):
         pass
     else:
         raise TypeError("image must be str, Path, or bytes")
-    return base64.b64encode(image).decode()
+
+    return await compress_image(image)
 
 
 def process_cookie(cookie: str | Path | list[dict]):
@@ -127,7 +175,9 @@ def process_cookie(cookie: str | Path | list[dict]):
         morsel = http.cookies.Morsel()
         morsel.set(cookie_dict["name"], cookie_dict["value"], cookie_dict["value"])
         morsel["domain"] = cookie_dict["domain"]
-        cookie_jar.update_cookies(http.cookies.SimpleCookie({cookie_dict["name"]: morsel}))
+        cookie_jar.update_cookies(
+            http.cookies.SimpleCookie({cookie_dict["name"]: morsel})
+        )
 
     return cookie_jar
 
@@ -146,14 +196,14 @@ def get_location_hint_from_locale(locale: str) -> Union[dict, None]:
 
 
 async def build_chat_request(
-        client,
-        prompt: str,
-        chat_data: dict,
-        conversation_style: ConversationStyle | Literal[
-            "creative", "balanced", "precise"] = ConversationStyle.Precise,
-        image: str | bytes | Path = None,
-        personality=None,
-        locale=guess_locale(),
+    client,
+    prompt: str,
+    chat_data: dict,
+    conversation_style: ConversationStyle
+    | Literal["creative", "balanced", "precise"] = ConversationStyle.Precise,
+    image: str | bytes | Path = None,
+    personality=None,
+    locale=guess_locale(),
 ):
     if "message" in chat_data.keys():
         is_start_of_conversation = False
@@ -251,31 +301,37 @@ async def build_chat_request(
     if image:
         blob_id = ""
         async with aiohttp.ClientSession(cookie_jar=client.cookie_jar) as session:
-
             img_base64 = await process_image_to_base64(image)
 
             writer = aiohttp.MultipartWriter()
 
-            part_knowledge_request = writer.append(json.dumps({
-                "imageInfo": {},
-                "knowledgeRequest": {
-                    "invokedSkills": ["ImageById"],
-                    "subscriptionId": "Bing.Chat.Multimodal",
-                    "invokedSkillsRequestData": {"enableFaceBlur": False},
-                    "convoData": {
-                        "convoid": chat_data['conversationId'],
-                        "convotone": conversation_style.name
+            part_knowledge_request = writer.append(
+                json.dumps(
+                    {
+                        "imageInfo": {},
+                        "knowledgeRequest": {
+                            "invokedSkills": ["ImageById"],
+                            "subscriptionId": "Bing.Chat.Multimodal",
+                            "invokedSkillsRequestData": {"enableFaceBlur": False},
+                            "convoData": {
+                                "convoid": chat_data["conversationId"],
+                                "convotone": conversation_style.name,
+                            },
+                        },
                     }
-                }
-            }))
+                )
+            )
 
-            part_knowledge_request.set_content_disposition('form-data', name='knowledgeRequest')
+            part_knowledge_request.set_content_disposition(
+                "form-data", name="knowledgeRequest"
+            )
 
             part_image_base64 = writer.append(img_base64)
-            part_image_base64.set_content_disposition('form-data', name='imageBase64')
+            part_image_base64.set_content_disposition("form-data", name="imageBase64")
 
-            async with session.post("https://www.bing.com/images/kblob", headers=IMAGE_HEADERS,
-                                    data=writer) as response:
+            async with session.post(
+                "https://www.bing.com/images/kblob", headers=IMAGE_HEADERS, data=writer
+            ) as response:
                 if response.status != 200:
                     print(f"Status code: {response.status}")
                     text = await response.text()
@@ -284,16 +340,19 @@ async def build_chat_request(
                     raise Exception("Authentication failed")
                 try:
                     response_json = await response.json()
-                    blob_id = response_json[
-                        'blobId']
+                    blob_id = response_json["blobId"]
                 except json.decoder.JSONDecodeError as exc:
                     text = await response.text()
                     print(text)
                     raise Exception("Authentication failed") from exc
 
         if blob_id:
-            struct["arguments"][0]["message"]["imageUrl"] = "https://www.bing.com/images/blob?bcid=" + blob_id
-            struct["arguments"][0]["message"]["originalImageUrl"] = "https://www.bing.com/images/blob?bcid=" + blob_id
+            struct["arguments"][0]["message"]["imageUrl"] = (
+                "https://www.bing.com/images/blob?bcid=" + blob_id
+            )
+            struct["arguments"][0]["message"]["originalImageUrl"] = (
+                "https://www.bing.com/images/blob?bcid=" + blob_id
+            )
     if personality and is_start_of_conversation:
         struct["arguments"][0]["previousMessages"] = [
             {
