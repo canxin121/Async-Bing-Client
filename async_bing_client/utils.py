@@ -208,7 +208,8 @@ async def build_chat_request(
     if "message" in chat_data.keys():
         is_start_of_conversation = False
     else:
-        is_start_of_conversation = True
+        is_start_of_conversation = chat_data.get("isStart", True)
+
     if isinstance(conversation_style, str):
         conversation_style = getattr(ConversationStyle, conversation_style)
 

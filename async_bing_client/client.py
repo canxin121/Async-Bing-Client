@@ -43,7 +43,7 @@ ssl_context.load_verify_locations(certifi.where())
 
 class Bing_Client:
     def __init__(
-            self, cookie: str | Path | List[dict], proxy=None, wss_link: str = None
+        self, cookie: str | Path | List[dict], proxy=None, wss_link: str = None
     ):
         self.chats: dict = {}
         self.client_id: str = ""
@@ -56,12 +56,11 @@ class Bing_Client:
     def chat_list(self):
         return [{key: value} for key, value in self.chats.items()]
 
-    @async_retry(3)
     async def init(self):
         """初始化bing client"""
         logger.info("creating Bing Client - - -.")
         await self.get_chats()
-        await self.load_all_chats()
+        await self.load_all_chats(load_history=False)
         logger.info("Succeed to creat Bing Client.")
         return self
 
@@ -70,20 +69,24 @@ class Bing_Client:
         """创建一个新的对话,返回一个包含新对话信息的dict,可以直接传入到ask_stream中进行使用"""
         async with aiohttp.ClientSession(cookie_jar=self.cookie_jar) as session:
             async with session.get(
-                    "https://www.bing.com/turing/conversation/create",
-                    headers=HEADERS,
-                    proxy=self.proxy,
+                "https://www.bing.com/turing/conversation/create",
+                headers=HEADERS,
+                proxy=self.proxy,
             ) as response:
-                data = await response.json()
-                access_token = response.headers.get(
-                    "X-Sydney-EncryptedConversationSignature"
-                )
-                if access_token:
-                    data["access_token"] = urllib.parse.quote(access_token, safe="")
-                new_chat = {data["conversationId"]: data}
-                logger.info("Succeed to creat new chat")
-                self.chats = {**new_chat, **self.chats}
-                return new_chat
+                try:
+                    data = await response.json()
+                    access_token = response.headers.get(
+                        "X-Sydney-EncryptedConversationSignature"
+                    )
+                    if access_token:
+                        data["access_token"] = urllib.parse.quote(access_token, safe="")
+                    new_chat = {data["conversationId"]: {**data, "time": time()}}
+                    logger.info("Succeed to creat new chat")
+                    self.chats = {**new_chat, **self.chats}
+                    return new_chat
+                except Exception:
+                    error = await response.text()
+                    raise Exception(error)
 
     async def draw(self, prompt: str) -> List[Image] | Apology:
         """按照传入的prompt进行绘图,这个功能可以直接在ask_stream中被自动调用并返回图片或bing的apology"""
@@ -91,11 +94,10 @@ class Bing_Client:
 
         timeout = aiohttp.ClientTimeout(total=60)
         async with aiohttp.ClientSession(
-                cookie_jar=self.cookie_jar, headers=DRAW_HEADERS, timeout=timeout
+            cookie_jar=self.cookie_jar, headers=DRAW_HEADERS, timeout=timeout
         ) as session:
-            response = await session.post(
+            response = await session.get(
                 f"https://www.bing.com/images/create?q={url_encoded_prompt}&rt=3&FORM=GENCRE",
-                data=f"q={url_encoded_prompt}&qs=ds",
                 allow_redirects=False,
                 proxy=self.proxy,
             )
@@ -149,15 +151,15 @@ class Bing_Client:
             return result_images
 
     async def ask_stream(
-            self,
-            question: str,
-            image: str | Path | bytes = None,
-            chat: dict = None,
-            conversation_style: ConversationStyle
-                                | Literal["creative", "balanced", "precise"] = ConversationStyle.Creative,
-            personality=None,
-            yield_search: bool = False,
-            locale=guess_locale(),
+        self,
+        question: str,
+        image: str | Path | bytes = None,
+        chat: dict = None,
+        conversation_style: ConversationStyle
+        | Literal["creative", "balanced", "precise"] = ConversationStyle.Creative,
+        personality=None,
+        yield_search: bool = False,
+        locale=guess_locale(),
     ):
         """返回纯文本信息的 ask_stream,其中的链接和图片链接均处理成了markdown格式,是对ask_stream_raw的封装"""
         sources = []
@@ -165,7 +167,7 @@ class Bing_Client:
         images = []
         limit = None
         async for data in self.ask_stream_raw(
-                question, image, chat, conversation_style, personality, locale=locale
+            question, image, chat, conversation_style, personality, locale=locale
         ):
             if isinstance(data, Text):
                 yield data.content
@@ -197,13 +199,13 @@ class Bing_Client:
             yield f"\n\nLimit:{limit.num_user_messages} of {limit.max_num_user_messages}  "
 
     async def ask_stream_raw(
-            self,
-            question: str,
-            image: str | Path | bytes = None,
-            chat: dict = None,  # noqa: E501
-            conversation_style: ConversationStyle = ConversationStyle.Creative,
-            personality=None,
-            locale=guess_locale(),
+        self,
+        question: str,
+        image: str | Path | bytes = None,
+        chat: dict = None,
+        conversation_style: ConversationStyle = ConversationStyle.Creative,
+        personality=None,
+        locale=guess_locale(),
     ) -> AsyncGenerator[
         NewChat
         | Apology
@@ -215,31 +217,36 @@ class Bing_Client:
         | Limit
         | Response
         | Any
-        ]:
+    ]:
         """返回原始数据类型的流式对话生成器,返回的类型请在type中自行查看"""
         if not chat:
             chat = await self.create_chat()
             yield NewChat(chat=chat)
 
         conversation_id = list(chat.keys())[0]
+
         if conversation_id in self.chats:
             chat_data = list(chat.values())[0]
             chat_data.update(self.chats[conversation_id])
         else:
             chat_data = list(chat.values())[0]
 
-        access_token = chat_data.get("access_token")
+        if not chat_data.get("time") or time() - chat_data.get("time") > 2500:
+            await self.get_token(conversation_id)
+            self.chats[conversation_id]["time"] = time()
+
+        access_token = chat_data.get("access_token", "")
         if access_token:
             url = (
-                    (self.wss_link or "wss://sydney.bing.com/sydney/ChatHub")
-                    + "?sec_access_token="
-                    + chat_data["access_token"]
+                (self.wss_link or "wss://sydney.bing.com/sydney/ChatHub")
+                + "?sec_access_token="
+                + access_token
             )
         else:
             url = self.wss_link or "wss://sydney.bing.com/sydney/ChatHub"
         async with aiohttp.ClientSession(cookie_jar=self.cookie_jar) as session:
             async with session.ws_connect(
-                    url=url, ssl=ssl_context, headers=WSSHEADERS, proxy=self.proxy
+                url=url, ssl=ssl_context, headers=WSSHEADERS, proxy=self.proxy
             ) as wss:
                 await wss.send_str(
                     append_identifier({"protocol": "json", "version": 1})
@@ -305,21 +312,21 @@ class Bing_Client:
                             f.write(json.dumps(store_data))
                         # 用type来区分response的类型,并且只要bot发的消息,过滤掉
                         if (
-                                response.get("type") == 1
-                                and response["arguments"][0].get("messages")
-                                and response["arguments"][0]["messages"]
-                                and response["arguments"][0]["messages"][0].get(
-                            "author", ""
-                        )
-                                == "bot"
+                            response.get("type") == 1
+                            and response["arguments"][0].get("messages")
+                            and response["arguments"][0]["messages"]
+                            and response["arguments"][0]["messages"][0].get(
+                                "author", ""
+                            )
+                            == "bot"
                         ):  # noqa: E501
                             messages = response["arguments"][0]["messages"]
                             for message in messages:
                                 if (
-                                        message.get(
-                                            "messageType",
-                                        )
-                                        == "GenerateContentQuery"
+                                    message.get(
+                                        "messageType",
+                                    )
+                                    == "GenerateContentQuery"
                                 ):
                                     """Draw images"""
                                     image_tasks.append(
@@ -328,12 +335,12 @@ class Bing_Client:
                                         )
                                     )
                                 if (
-                                        message.get("messageType")
-                                        == "InternalLoaderMessage"
+                                    message.get("messageType")
+                                    == "InternalLoaderMessage"
                                 ):  # noqa: E501
                                     yield Notice(content=message.get("text", ""))
                                 elif (
-                                        message.get("messageType") == "InternalSearchResult"
+                                    message.get("messageType") == "InternalSearchResult"
                                 ):
                                     try:
                                         content = (
@@ -350,7 +357,7 @@ class Bing_Client:
                                         content = message.get("text", "")
                                     yield SearchResult(content=content)
                                 elif message["contentOrigin"] == "Apology":
-                                    yield_text = message.get("text", "")[len(apology):]
+                                    yield_text = message.get("text", "")[len(apology) :]
                                     apology = message.get("text", "")
                                     if yield_text:
                                         yield Apology(content=yield_text)
@@ -358,23 +365,23 @@ class Bing_Client:
                                 elif "messageType" not in message.keys():
                                     plain_text: str = message.get("text", "")
                                     if plain_text.endswith(
-                                            (
-                                                    "[",
-                                                    "]",
-                                                    "(",
-                                                    ")",
-                                                    "^",
-                                                    "1",
-                                                    "2",
-                                                    "3",
-                                                    "4",
-                                                    "5",
-                                                    "6",
-                                                    "7",
-                                                    "8",
-                                                    "9",
-                                                    "0",
-                                            )
+                                        (
+                                            "[",
+                                            "]",
+                                            "(",
+                                            ")",
+                                            "^",
+                                            "1",
+                                            "2",
+                                            "3",
+                                            "4",
+                                            "5",
+                                            "6",
+                                            "7",
+                                            "8",
+                                            "9",
+                                            "0",
+                                        )
                                     ):
                                         continue
                                     plain_text: str = (
@@ -383,15 +390,15 @@ class Bing_Client:
                                         .replace("(^", "(")
                                         .replace("^)", ")")
                                     )
-                                    yield_text = plain_text[len(last_text):]
+                                    yield_text = plain_text[len(last_text) :]
                                     last_text = plain_text
 
                                     if yield_text:
                                         yield Text(content=yield_text)
 
                                     if (
-                                            message.get("sourceAttributions")
-                                            and message["sourceAttributions"]
+                                        message.get("sourceAttributions")
+                                        and message["sourceAttributions"]
                                     ):
                                         for sa in message.get("sourceAttributions", ""):
                                             new_sa = SourceAttribution(
@@ -410,11 +417,11 @@ class Bing_Client:
                                                 yield new_sa
 
                                     if (
-                                            message.get("suggestedResponses")
-                                            and message["suggestedResponses"]
+                                        message.get("suggestedResponses")
+                                        and message["suggestedResponses"]
                                     ):
                                         for suggest_dict in message.get(
-                                                "suggestedResponses"
+                                            "suggestedResponses"
                                         ):
                                             suggest = suggest_dict.get("text", "")
                                             if suggest:
@@ -426,7 +433,7 @@ class Bing_Client:
                                 else:
                                     continue
                         elif response.get("type") == 1 and (
-                                (response.get("arguments", [{}]))[0]
+                            (response.get("arguments", [{}]))[0]
                         ).get(
                             "throttling", ""
                         ):  # noqa: E501
@@ -434,8 +441,8 @@ class Bing_Client:
                                 "throttling", ""
                             )
                             if (
-                                    limit["maxNumUserMessagesInConversation"]
-                                    < limit["numUserMessagesInConversation"]
+                                limit["maxNumUserMessagesInConversation"]
+                                < limit["numUserMessagesInConversation"]
                             ):
                                 yield Apology(
                                     content="The number of chats has reached the maximum, please open a new conversation\n聊天次数达到上限,请开启新的对话"
@@ -467,10 +474,10 @@ class Bing_Client:
                                 if chat_data["conversationId"] not in self.chats.keys():
                                     self.chats[chat_data["conversationId"]] = {}
                                 if (
-                                        "message"
-                                        not in self.chats[
-                                    chat_data["conversationId"]
-                                ].keys()
+                                    "message"
+                                    not in self.chats[
+                                        chat_data["conversationId"]
+                                    ].keys()
                                 ):
                                     self.chats[chat_data["conversationId"]][
                                         "message"
@@ -508,72 +515,84 @@ class Bing_Client:
         """获取最多200个bing的会话窗口的信息"""
         async with aiohttp.ClientSession(cookie_jar=self.cookie_jar) as session:
             async with session.get(
-                    "https://www.bing.com/turing/conversation/chats",
-                    headers=HEADERS,
-                    proxy=self.proxy,
+                "https://www.bing.com/turing/conversation/chats",
+                headers=HEADERS,
+                proxy=self.proxy,
             ) as response:
                 resp = await response.json()
                 self.client_id = resp["clientId"]
-                self.chats = {chat["conversationId"]: chat for chat in resp["chats"]}
+                self.chats = {
+                    chat["conversationId"]: {**chat, **{"isStart": False}}
+                    for chat in resp["chats"]
+                }
                 logger.info("Succeed to get chat lists")
                 return self.chats
 
-    async def load_chat_data(self, conversation_id) -> None:
-        """获取某个会话窗口的所有聊天信息和access_token(如果有)"""
-        conversation_signature = self.chats[conversation_id].get(
-            "conversationSignature", None
-        )  # noqa: E501
-        if not conversation_signature:
-            raise Exception("Conversation not found")
+    @async_retry(10)
+    async def get_token(self, conversation_id):
+        """获取对应聊天窗口的access_token"""
         timeout = aiohttp.ClientTimeout(total=20)
-
-        @async_retry(10)
-        async def get_history():
-            async with aiohttp.ClientSession(
-                    cookie_jar=self.cookie_jar, timeout=timeout
-            ) as session:
-                async with session.get(
-                        f"https://sydney.bing.com/sydney/GetConversation?conversationId={conversation_id}&source=cib&participantId={self.client_id}&conversationSignature={urllib.parse.quote(conversation_signature)}&traceId={uuid.uuid4()}",
-                        headers=HEADERS,
-                        proxy=self.proxy,
-                ) as response:
-                    data = await response.json()
-                    self.chats[conversation_id]["message"] = data.get("messages", [])
+        async with aiohttp.ClientSession(
+            cookie_jar=self.cookie_jar, timeout=timeout
+        ) as session:
+            async with session.get(
+                f"https://www.bing.com/turing/conversation/create?conversationId={urllib.parse.quote(conversation_id, safe='')}",
+                headers=HEADERS,
+                proxy=self.proxy,
+            ) as response:
+                access_token = response.headers.get(
+                    "X-Sydney-EncryptedConversationSignature"
+                )
+                if access_token:
+                    self.chats[conversation_id]["access_token"] = urllib.parse.quote(
+                        access_token, safe=""
+                    )  # noqa: E501
+                else:
                     return
 
-        @async_retry(10)
-        async def get_token():
-            async with aiohttp.ClientSession(
-                    cookie_jar=self.cookie_jar, timeout=timeout
-            ) as session:
-                async with session.get(
-                        f"https://www.bing.com/turing/conversation/create?conversationId={urllib.parse.quote(conversation_id, safe='')}",
-                        headers=HEADERS,
-                        proxy=self.proxy,
-                ) as response:
-                    access_token = response.headers.get(
-                        "X-Sydney-EncryptedConversationSignature"
-                    )
-                    if access_token:
-                        self.chats[conversation_id][
-                            "access_token"
-                        ] = urllib.parse.quote(
-                            access_token, safe=""
-                        )  # noqa: E501
-                    else:
-                        return
+    @async_retry(10)
+    async def get_chat_history(self, conversation_id):
+        """获取对应的聊天窗口的所有消息"""
+        conversation_signature = self.chats[conversation_id].get(
+            "conversationSignature", None
+        )
+        if conversation_signature:
+            url = f"https://sydney.bing.com/sydney/GetConversation?conversationId={conversation_id}&source=cib&participantId={self.client_id}&conversationSignature={urllib.parse.quote(conversation_signature)}&traceId={uuid.uuid4()}"
+        else:
+            url = f"https://sydney.bing.com/sydney/GetConversation?conversationId={conversation_id}&source=cib&participantId={self.client_id}&traceId={uuid.uuid4()}"
+        timeout = aiohttp.ClientTimeout(total=20)
+        async with aiohttp.ClientSession(
+            cookie_jar=self.cookie_jar, timeout=timeout
+        ) as session:
+            async with session.get(
+                url,
+                headers=HEADERS,
+                proxy=self.proxy,
+            ) as response:
+                data = await response.json()
+                self.chats[conversation_id]["message"] = data.get("messages", [])
+                return
 
-        tasks = [asyncio.create_task(get_history()), asyncio.create_task(get_token())]
+    async def load_chat_data(self, conversation_id, load_history: bool = False) -> None:
+        """获取某个会话窗口的所有聊天信息(如果load_history)和access_token(如果有)"""
+        tasks = [asyncio.create_task(self.get_token(conversation_id))]  # noqa: E501
+        if load_history:
+            tasks.append(asyncio.create_task(self.get_chat_history(conversation_id)))
+
         await asyncio.gather(*tasks)
 
-    async def load_all_chats(self):
+    async def load_all_chats(self, load_history: bool = False):
         """并发拉取所有的chat的信息,并入client的chats进行缓存"""
         tasks = []
         for conversation_id in list(self.chats.keys()):
-            task = asyncio.create_task(self.load_chat_data(conversation_id))
+            task = asyncio.create_task(
+                self.load_chat_data(conversation_id, load_history=load_history)
+            )
             tasks.append(task)
         await asyncio.gather(*tasks)
-        logger.info("Succeed to load all chat's data and history")
+        logger.info(
+            "Succeed to load all chat's data" + " and history" if load_history else ""
+        )
         return
 
     @async_retry(3)
@@ -586,22 +605,22 @@ class Bing_Client:
             raise Exception("The conversation didn't exist")
         else:
             async with aiohttp.ClientSession(
-                    cookie_jar=self.cookie_jar, headers=DELETE_HEADERS
+                cookie_jar=self.cookie_jar, headers=DELETE_HEADERS
             ) as session:
                 async with session.post(
-                        "https://sydney.bing.com/sydney/DeleteSingleConversation",
-                        data=json.dumps(
-                            {
-                                "conversationId": conversation_id,
-                                "conversationSignature": self.chats[conversation_id][
-                                    "conversationSignature"
-                                ],
-                                "participant": {"id": self.client_id},
-                                "source": "cib",
-                                "optionsSets": ["autosave"],
-                            }
-                        ),
-                        proxy=self.proxy,
+                    "https://sydney.bing.com/sydney/DeleteSingleConversation",
+                    data=json.dumps(
+                        {
+                            "conversationId": conversation_id,
+                            "conversationSignature": self.chats[conversation_id][
+                                "conversationSignature"
+                            ],
+                            "participant": {"id": self.client_id},
+                            "source": "cib",
+                            "optionsSets": ["autosave"],
+                        }
+                    ),
+                    proxy=self.proxy,
                 ) as resp:
                     if resp.status == 200:
                         logger.info(f"Succeed to delete conservation:{conversation_id}")
@@ -612,7 +631,7 @@ class Bing_Client:
                         raise Exception(f"Failed to delete conversation:{text}")
 
     async def delete_conversation_by_count(
-            self, count: int = 20, del_all: bool = False
+        self, count: int = 20, del_all: bool = False
     ):
         """按照数量删除你的对话窗口,也可以设置全部删除"""
         chats = list(self.chats.values())
