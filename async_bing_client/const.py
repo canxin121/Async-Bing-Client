@@ -3,24 +3,26 @@ import uuid
 
 from pydantic.types import Enum
 
-FORWARDED_IP = f"13.{random.randint(104, 107)}.{random.randint(0, 255)}.{random.randint(0, 255)}"
+FORWARDED_IP = (
+    f"13.{random.randint(104, 107)}.{random.randint(0, 255)}.{random.randint(0, 255)}"
+)
 HEADERS = {
-    'Referer': 'https://www.bing.com/search?q=Bing',
-    'Sec-Ch-Ua': '"Not/A)Brand";v="99", "Google Chrome";v="115", "Chromium";v="115"',
-    'Sec-Ch-Ua-Arch': '"x86"',
-    'Sec-Ch-Ua-Bitness': '"64"',
-    'Sec-Ch-Ua-Full-Version': '"115.0.5790.171"',
-    'Sec-Ch-Ua-Full-Version-List': '"Not/A)Brand";v="99.0.0.0", "Google Chrome";v="115.0.5790.171", "Chromium";v="115.0.5790.171"',
-    'Sec-Ch-Ua-Mobile': '?0',
-    'Sec-Ch-Ua-Model': '',
-    'Sec-Ch-Ua-Platform': '"Windows"',
-    'Sec-Ch-Ua-Platform-Version': '"15.0.0"',
-    'Sec-Fetch-Dest': 'empty',
-    'Sec-Fetch-Mode': 'cors',
-    'Sec-Fetch-Site': 'same-origin',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
-    'X-Ms-Client-Request-Id': str(uuid.uuid4()),
-    'X-Ms-Useragent': 'azsdk-js-api-client-factory/1.0.0-beta.1 core-rest-pipeline/1.10.3 OS/Windows',
+    "Referer": "https://www.bing.com/search?q=Bing",
+    "Sec-Ch-Ua": '"Not/A)Brand";v="99", "Google Chrome";v="115", "Chromium";v="115"',
+    "Sec-Ch-Ua-Arch": '"x86"',
+    "Sec-Ch-Ua-Bitness": '"64"',
+    "Sec-Ch-Ua-Full-Version": '"115.0.5790.171"',
+    "Sec-Ch-Ua-Full-Version-List": '"Not/A)Brand";v="99.0.0.0", "Google Chrome";v="115.0.5790.171", "Chromium";v="115.0.5790.171"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Model": "",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Ch-Ua-Platform-Version": '"15.0.0"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+    "X-Ms-Client-Request-Id": str(uuid.uuid4()),
+    "X-Ms-Useragent": "azsdk-js-api-client-factory/1.0.0-beta.1 core-rest-pipeline/1.10.3 OS/Windows",
     "x-forwarded-for": FORWARDED_IP,
 }
 WSSHEADERS = {
@@ -30,7 +32,7 @@ WSSHEADERS = {
     "sec-websocket-extensions": "permessage-deflate; client_max_window_bits",
     "sec-websocket-key": "cwPgaMauiFR4WOfbbM0AJA==",
     "sec-websocket-version": "13",
-    "x-forwarded-for": FORWARDED_IP  # noqa: E501
+    "x-forwarded-for": FORWARDED_IP,  # noqa: E501
 }
 DELETE_HEADERS = {
     "accept": "*/*",
@@ -39,9 +41,9 @@ DELETE_HEADERS = {
     "cache-control": "no-cache",
     "content-type": "application/json",
     "pragma": "no-cache",
-    "sec-ch-ua": "\"Chromium\";v=\"116\", \"Not)A;Brand\";v=\"24\", \"Google Chrome\";v=\"116\"",
+    "sec-ch-ua": '"Chromium";v="116", "Not)A;Brand";v="24", "Google Chrome";v="116"',
     "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": "\"Windows\"",
+    "sec-ch-ua-platform": '"Windows"',
     "sec-fetch-dest": "empty",
     "sec-fetch-mode": "cors",
     "sec-fetch-site": "same-site",
@@ -55,31 +57,43 @@ IMAGE_HEADERS = {
     "cache-control": "no-cache",
     "content-type": "multipart/form-data; boundary=----WebKitFormBoundaryyO5cqct50HdHb9Qi",
     "pragma": "no-cache",
-    "sec-ch-ua": "\"Not/A)Brand\";v=\"99\", \"Google Chrome\";v=\"115\", \"Chromium\";v=\"115\"",
-    "sec-ch-ua-arch": "\"x86\"",
-    "sec-ch-ua-bitness": "\"64\"",
-    "sec-ch-ua-full-version": "\"115.0.5790.171\"",
-    "sec-ch-ua-full-version-list": "\"Not/A)Brand\";v=\"99.0.0.0\", \"Google Chrome\";v=\"115.0.5790.171\", \"Chromium\";v=\"115.0.5790.171\"",
+    "sec-ch-ua": '"Not/A)Brand";v="99", "Google Chrome";v="115", "Chromium";v="115"',
+    "sec-ch-ua-arch": '"x86"',
+    "sec-ch-ua-bitness": '"64"',
+    "sec-ch-ua-full-version": '"115.0.5790.171"',
+    "sec-ch-ua-full-version-list": '"Not/A)Brand";v="99.0.0.0", "Google Chrome";v="115.0.5790.171", "Chromium";v="115.0.5790.171"',
     "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-model": "\"\"",
-    "sec-ch-ua-platform": "\"Windows\"",
-    "sec-ch-ua-platform-version": "\"15.0.0\"",
+    "sec-ch-ua-model": '""',
+    "sec-ch-ua-platform": '"Windows"',
+    "sec-ch-ua-platform-version": '"15.0.0"',
     "sec-fetch-dest": "empty",
     "sec-fetch-mode": "cors",
     "sec-fetch-site": "same-origin",
     "cookie": "cookie",
     "Referer": "https://www.bing.com/search?q=1",
-    "Referrer-Policy": "origin-when-cross-origin"
+    "Referrer-Policy": "origin-when-cross-origin",
 }
 
 DRAW_HEADERS = {
-    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-    "accept-language": "en-US,en;q=0.9",
-    "cache-control": "max-age=0",
-    "content-type": "application/x-www-form-urlencoded",
-    "referrer": "https://www.bing.com/images/create/",
-    "origin": "https://www.bing.com",
-    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36 Edg/110.0.1587.63",
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "accept-language": "zh-CN,zh;q=0.9",
+    "cache-control": "no-cache",
+    "pragma": "no-cache",
+    "sec-ch-ua": '"Chromium";v="116", "Not)A;Brand";v="24", "Google Chrome";v="116"',
+    "sec-ch-ua-arch": '"x86"',
+    "sec-ch-ua-bitness": '"64"',
+    "sec-ch-ua-full-version": '"116.0.5845.141"',
+    "sec-ch-ua-full-version-list": '"Chromium";v="116.0.5845.141", "Not)A;Brand";v="24.0.0.0", "Google Chrome";v="116.0.5845.141"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-model": '""',
+    "sec-ch-ua-platform": '"Windows"',
+    "sec-ch-ua-platform-version": '"15.0.0"',
+    "sec-fetch-dest": "iframe",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-site": "same-origin",
+    "upgrade-insecure-requests": "1",
+    "Referer": "https://www.bing.com/search?q=Bing+Ai",
+    "Referrer-Policy": "origin-when-cross-origin",
     "x-forwarded-for": FORWARDED_IP,
 }
 
@@ -101,7 +115,7 @@ class ConversationStyle(Enum):
         "udt4upm5gnd",
         "eredirecturl",
         "clgalileo",
-        "gencontentv3"
+        "gencontentv3",
     ]
     Balanced = [
         "nlu_direct_response_filter",
@@ -118,7 +132,7 @@ class ConversationStyle(Enum):
         "logosv1",
         "udt4upm5gnd",
         "eredirecturl",
-        "saharagenconv5"
+        "saharagenconv5",
     ]
     Precise = [
         "nlu_direct_response_filter",
@@ -137,7 +151,7 @@ class ConversationStyle(Enum):
         "eredirecturl",
         "clgalileo",
         "gencontentv3",
-        "gpt40613"
+        "gpt40613",
     ]
 
 

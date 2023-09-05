@@ -90,33 +90,52 @@ class Bing_Client:
 
     async def draw(self, prompt: str) -> List[Image] | Apology:
         """按照传入的prompt进行绘图,这个功能可以直接在ask_stream中被自动调用并返回图片或bing的apology"""
-        url_encoded_prompt = urllib.parse.quote(prompt)
+        url_encoded_prompt = urllib.parse.quote(f"prompt='{prompt}'")
 
         timeout = aiohttp.ClientTimeout(total=60)
         async with aiohttp.ClientSession(
-            cookie_jar=self.cookie_jar, headers=DRAW_HEADERS, timeout=timeout
+            cookie_jar=self.cookie_jar,
+            headers=DRAW_HEADERS,
+            timeout=timeout,
         ) as session:
             response = await session.get(
-                f"https://www.bing.com/images/create?q={url_encoded_prompt}&rt=3&FORM=GENCRE",
+                url=f"https://www.bing.com/images/create?partner=sydney&re=1&showselective=1&sude=1&kseed=8000&SFX=3&q={url_encoded_prompt}&iframeid={uuid.uuid4()}",
                 allow_redirects=False,
                 proxy=self.proxy,
             )
+            if response.status != 302:
+                return Apology(content="Drawing Failed: Redirect failed")
             resp_text = await response.text()
             if "this prompt has been blocked" in resp_text.lower():
                 return Apology(
                     content="Your prompt has been blocked by Bing. Try to change any bad words and try again."
                 )
-            if response.status != 302:
-                url = f"https://www.bing.com/images/create?q={url_encoded_prompt}&rt=4&FORM=GENCRE"
-                response = await session.post(
-                    url, timeout=200, allow_redirects=False, proxy=self.proxy
+            redirect_url = f"https://www.bing.com{response.headers['Location']}"
+            response = await session.get(
+                redirect_url,
+                allow_redirects=False,
+                proxy=self.proxy,
+            )
+            resp_text = await response.text()
+            if "blocked" in resp_text:
+                return Apology(
+                    content="Your prompt has been blocked by Bing. Try to change any bad words and try again."
                 )
+            if response.status != 302:
+                response = await session.get(
+                    redirect_url.replace("rt=4", "rt=3"),
+                    allow_redirects=False,
+                    proxy=self.proxy,
+                )
+                resp_text = await response.text()
+                if "blocked" in resp_text:
+                    return Apology(
+                        content="Your prompt has been blocked by Bing. Try to change any bad words and try again."
+                    )
                 if response.status != 302:
                     return Apology(content="Drawing Failed: Redirect failed")
 
-            redirect_url = response.headers["Location"].replace("&nfy=1", "")
-            request_id = redirect_url.split("id=")[-1]
-            await session.get(f"https://www.bing.com{redirect_url}", proxy=self.proxy)
+            request_id = response.headers["Location"].split("id=")[-1]
 
             polling_url = f"https://www.bing.com/images/create/async/results/{request_id}?q={url_encoded_prompt}"
 
@@ -125,23 +144,19 @@ class Bing_Client:
                 if response.status != 200:
                     return Apology(content="Drawing Failed: Could not get results")
                 content = await response.text()
-                if content and content.find("errorMessage") == -1:
-                    break
 
-                await asyncio.sleep(1)
-                continue
+                if content:
+                    break
+                else:
+                    await asyncio.sleep(1)
 
             image_links = regex.findall(r'src="([^"]+)"', content)
 
             normal_image_links = [link.split("?w=")[0] for link in image_links]
 
             normal_image_links = list(set(normal_image_links))
-            bad_images = [
-                "https://r.bing.com/rp/in-2zU3AJUdkgFe7ZKv19yPBHVs.png",
-                "https://r.bing.com/rp/TX9QuO3WzcCJz1uaaSwQAz39Kb0.jpg",
-            ]
             normal_image_links = [
-                img for img in normal_image_links if img not in bad_images
+                link for link in normal_image_links if "r.bing.com" not in link
             ]
             if not normal_image_links:
                 return Apology(content="Drawing Failed: No images are found.")
@@ -198,6 +213,16 @@ class Bing_Client:
         if limit:
             yield f"\n\nLimit:{limit.num_user_messages} of {limit.max_num_user_messages}  "
 
+    def get_chatdata(self, chat: dict):
+        conversation_id = list(chat.keys())[0]
+
+        if conversation_id in self.chats:
+            chat_data = list(chat.values())[0]
+            chat_data.update(self.chats[conversation_id])
+        else:
+            chat_data = list(chat.values())[0]
+        return chat_data
+
     async def ask_stream_raw(
         self,
         question: str,
@@ -223,25 +248,24 @@ class Bing_Client:
             chat = await self.create_chat()
             yield NewChat(chat=chat)
 
-        conversation_id = list(chat.keys())[0]
-
-        if conversation_id in self.chats:
-            chat_data = list(chat.values())[0]
-            chat_data.update(self.chats[conversation_id])
-        else:
-            chat_data = list(chat.values())[0]
-
-        if not chat_data.get("time") or time() - chat_data.get("time") > 2500:
-            await self.get_token(conversation_id)
-            self.chats[conversation_id]["time"] = time()
+        chat_data = self.get_chatdata(chat)
 
         access_token = chat_data.get("access_token", "")
-        if access_token:
+        conversation_signature = chat_data.get("conversationSignature", "")
+        if access_token or (not conversation_signature):
+            if (not chat_data.get("time") or time() - chat_data.get("time") > 2500) or (
+                not conversation_signature
+            ):
+                await self.get_token(chat_data["conversationId"])
+                self.chats[chat_data["conversationId"]]["time"] = time()
+                chat_data = self.get_chatdata(chat)
+
             url = (
                 (self.wss_link or "wss://sydney.bing.com/sydney/ChatHub")
                 + "?sec_access_token="
-                + access_token
+                + chat_data.get("access_token", "")
             )
+
         else:
             url = self.wss_link or "wss://sydney.bing.com/sydney/ChatHub"
         async with aiohttp.ClientSession(cookie_jar=self.cookie_jar) as session:
@@ -503,7 +527,7 @@ class Bing_Client:
                     results = await asyncio.gather(*image_tasks)
                     for result in results:
                         if isinstance(result, Apology):
-                            yield task
+                            yield result
                         elif isinstance(result, list):
                             for image in result:
                                 yield image
@@ -591,7 +615,7 @@ class Bing_Client:
             tasks.append(task)
         await asyncio.gather(*tasks)
         logger.info(
-            "Succeed to load all chat's data" + " and history" if load_history else ""
+            f"Succeed to load all chat's data{ 'and history' if load_history else ''}"
         )
         return
 

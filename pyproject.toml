@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "async-bing-client"
-version = "0.1.2"
+version = "0.1.4"
 description = "Async Client for Newbing."
 authors = ["canxin <1969730106@qq.com>"]
 readme = "README.md"
