@@ -9,7 +9,7 @@ Async Poe Client
 - 快速获取聊天数据
 - 批量删除会话功能
 - 无需 Tun 模式代理
-- 支持HTTP, SOCKS 代理  把上面的内容翻译成英文
+- 支持HTTP, SOCKS 代理
 
 # 使用说明
 
