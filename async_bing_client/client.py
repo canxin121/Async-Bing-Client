@@ -269,8 +269,12 @@ class Bing_Client:
         else:
             url = self.wss_link or "wss://sydney.bing.com/sydney/ChatHub"
         async with aiohttp.ClientSession(cookie_jar=self.cookie_jar) as session:
+            wss_headers = WSSHEADERS
+            if self.cookie_jar is not None:
+                wss_cookies = [f"{cookie.key}={cookie.value}" for cookie in self.cookie_jar]
+                wss_headers["cookie"] = ";".join(wss_cookies)
             async with session.ws_connect(
-                    url=url, ssl=ssl_context, headers=WSSHEADERS, proxy=self.proxy
+                    url=url, ssl=ssl_context, headers=wss_headers, proxy=self.proxy
             ) as wss:
                 await wss.send_str(
                     append_identifier({"protocol": "json", "version": 1})
